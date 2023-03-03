@@ -850,7 +850,7 @@ void events_destroy(events events)
 	free(e);
 }
 
-struct in_progress_measurement_internal {
+struct in_progress_measurement {
 	struct events *events;
 	u32 classes;
 	usize counter_map[KPC_MAX_COUNTERS];
@@ -862,9 +862,9 @@ typedef void *in_progress_measurement;
 
 in_progress_measurement start_measurement(events events)
 {
-	struct in_progress_measurement_internal *m =
-		calloc(1, sizeof(struct in_progress_measurement_internal));
-	*m = (struct in_progress_measurement_internal){
+	struct in_progress_measurement *m =
+		calloc(1, sizeof(struct in_progress_measurement));
+	*m = (struct in_progress_measurement){
 		.events = events,
 		.classes = 0,
 		.counter_map = { 0 },
@@ -911,9 +911,9 @@ in_progress_measurement start_measurement(events events)
 	return m;
 }
 
-void finish_measurement(in_progress_measurement m)
+void finish_measurement(in_progress_measurement in_progress_measurement)
 {
-	struct in_progress_measurement_internal *mi = m;
+	struct in_progress_measurement *m = in_progress_measurement;
 
 	u64 counters_after[KPC_MAX_COUNTERS] = { 0 };
 
@@ -925,10 +925,10 @@ void finish_measurement(in_progress_measurement m)
 
 	setlocale(LC_NUMERIC, "");
 	printf("counters value:\n");
-	for (usize i = 0; i < mi->events->count; i++) {
-		const char *name = mi->events->human_readable_names[i];
-		usize idx = mi->counter_map[i];
-		u64 diff = counters_after[idx] - mi->counters[idx];
+	for (usize i = 0; i < m->events->count; i++) {
+		const char *name = m->events->human_readable_names[i];
+		usize idx = m->counter_map[i];
+		u64 diff = counters_after[idx] - m->counters[idx];
 		printf("%40s: %15'llu\n", name, diff);
 	}
 
