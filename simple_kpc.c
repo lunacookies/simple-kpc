@@ -394,13 +394,13 @@ void sk_finish_measurement(sk_in_progress_measurement *m)
 	kpc_set_counting(0);
 	kpc_force_all_ctrs_set(0);
 
+	printf("\033[1m=== simple-kpc report ===\033[m\n\n");
 	setlocale(LC_NUMERIC, "");
-	printf("counters value:\n");
 	for (usize i = 0; i < m->events->count; i++) {
 		const char *name = m->events->human_readable_names[i];
 		usize idx = m->counter_map[i];
 		u64 diff = counters_after[idx] - m->counters[idx];
-		printf("%40s: %15'llu\n", name, diff);
+		printf("\033[32m%16'llu \033[95m%s\033[m\n", diff, name);
 	}
 
 	free(m);
