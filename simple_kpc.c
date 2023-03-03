@@ -1,5 +1,6 @@
 #include "simple_kpc.h"
 
+#include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,6 +22,8 @@ typedef uint32_t u32;
 typedef int64_t i64;
 typedef uint64_t u64;
 typedef size_t usize;
+
+#define ARRAY_LENGTH(x) (sizeof(x) / sizeof((x)[0]))
 
 // The maximum number of counters we could read from every class in one go.
 // ARMV7: FIXED: 1, CONFIGURABLE: 4
@@ -160,125 +163,88 @@ static int (*kpep_db_event)(void *db, const char *name, void **ev_ptr);
 typedef struct {
 	const char *name;
 	void **impl;
-} lib_symbol;
+} symbol;
 
-#define lib_nelems(x) (sizeof(x) / sizeof((x)[0]))
-#define lib_symbol_def(name)                                                   \
-	{                                                                      \
-#name, (void **)&name                                          \
-	}
+#define SYMBOL(n) { .name = #n, .impl = (void **)&n }
 
-static const lib_symbol lib_symbols_kperf[] = {
-	lib_symbol_def(kpc_set_counting),
-	lib_symbol_def(kpc_set_thread_counting),
-	lib_symbol_def(kpc_set_config),
-	lib_symbol_def(kpc_get_thread_counters),
-	lib_symbol_def(kpc_force_all_ctrs_set),
-	lib_symbol_def(kpc_force_all_ctrs_get),
+static const symbol KPERF_SYMBOLS[] = {
+	SYMBOL(kpc_set_counting),
+	SYMBOL(kpc_set_thread_counting),
+	SYMBOL(kpc_set_config),
+	SYMBOL(kpc_get_thread_counters),
+	SYMBOL(kpc_force_all_ctrs_set),
+	SYMBOL(kpc_force_all_ctrs_get),
 };
 
-static const lib_symbol lib_symbols_kperfdata[] = {
-	lib_symbol_def(kpep_config_create),
-	lib_symbol_def(kpep_config_free),
-	lib_symbol_def(kpep_config_add_event),
-	lib_symbol_def(kpep_config_force_counters),
-	lib_symbol_def(kpep_config_kpc),
-	lib_symbol_def(kpep_config_kpc_classes),
-	lib_symbol_def(kpep_config_kpc_map),
-	lib_symbol_def(kpep_db_create),
-	lib_symbol_def(kpep_db_free),
-	lib_symbol_def(kpep_db_events_count),
-	lib_symbol_def(kpep_db_events),
-	lib_symbol_def(kpep_db_event),
+static const symbol KPERFDATA_SYMBOLS[] = {
+	SYMBOL(kpep_config_create),
+	SYMBOL(kpep_config_free),
+	SYMBOL(kpep_config_add_event),
+	SYMBOL(kpep_config_force_counters),
+	SYMBOL(kpep_config_kpc),
+	SYMBOL(kpep_config_kpc_classes),
+	SYMBOL(kpep_config_kpc_map),
+	SYMBOL(kpep_db_create),
+	SYMBOL(kpep_db_free),
+	SYMBOL(kpep_db_events_count),
+	SYMBOL(kpep_db_events),
+	SYMBOL(kpep_db_event),
 };
 
-#define lib_path_kperf "/System/Library/PrivateFrameworks/kperf.framework/kperf"
-#define lib_path_kperfdata                                                     \
+#define KPERF_PATH "/System/Library/PrivateFrameworks/kperf.framework/kperf"
+#define KPERFDATA_PATH                                                         \
 	"/System/Library/PrivateFrameworks/kperfdata.framework/kperfdata"
 
-static bool lib_inited = false;
-static bool lib_has_err = false;
-static char lib_err_msg[256];
+static bool initialized = false;
 
-static void *lib_handle_kperf = NULL;
-static void *lib_handle_kperfdata = NULL;
-
-static void lib_deinit(void)
+void sk_init(void)
 {
-	lib_inited = false;
-	lib_has_err = false;
-	if (lib_handle_kperf)
-		dlclose(lib_handle_kperf);
-	if (lib_handle_kperfdata)
-		dlclose(lib_handle_kperfdata);
-	lib_handle_kperf = NULL;
-	lib_handle_kperfdata = NULL;
-	for (usize i = 0; i < lib_nelems(lib_symbols_kperf); i++) {
-		const lib_symbol *symbol = &lib_symbols_kperf[i];
-		*symbol->impl = NULL;
-	}
-	for (usize i = 0; i < lib_nelems(lib_symbols_kperfdata); i++) {
-		const lib_symbol *symbol = &lib_symbols_kperfdata[i];
-		*symbol->impl = NULL;
-	}
-}
+	if (initialized)
+		return;
 
-static bool lib_init(void)
-{
-#define return_err()                                                           \
-	do {                                                                   \
-		lib_deinit();                                                  \
-		lib_inited = true;                                             \
-		lib_has_err = true;                                            \
-		return false;                                                  \
-	} while (false)
-
-	if (lib_inited)
-		return !lib_has_err;
-
-	// load dynamic library
-	lib_handle_kperf = dlopen(lib_path_kperf, RTLD_LAZY);
-	if (!lib_handle_kperf) {
-		snprintf(lib_err_msg, sizeof(lib_err_msg),
-			 "Failed to load kperf.framework, message: %s.",
-			 dlerror());
-		return_err();
-	}
-	lib_handle_kperfdata = dlopen(lib_path_kperfdata, RTLD_LAZY);
-	if (!lib_handle_kperfdata) {
-		snprintf(lib_err_msg, sizeof(lib_err_msg),
-			 "Failed to load kperfdata.framework, message: %s.",
-			 dlerror());
-		return_err();
+	void *kperf = dlopen(KPERF_PATH, RTLD_LAZY);
+	if (!kperf) {
+		fprintf(stderr, "simple_kpc: failed to load kperf.framework, message: %s\n",
+			dlerror());
+		exit(1);
 	}
 
-	// load symbol address from dynamic library
-	for (usize i = 0; i < lib_nelems(lib_symbols_kperf); i++) {
-		const lib_symbol *symbol = &lib_symbols_kperf[i];
-		*symbol->impl = dlsym(lib_handle_kperf, symbol->name);
+	void *kperfdata = dlopen(KPERFDATA_PATH, RTLD_LAZY);
+	if (!kperfdata) {
+		fprintf(stderr,
+			"simple_kpc: failed to load kperfdata.framework, message: %s\n",
+			dlerror());
+		exit(1);
+	}
+
+	for (usize i = 0; i < ARRAY_LENGTH(KPERF_SYMBOLS); i++) {
+		const symbol *symbol = &KPERF_SYMBOLS[i];
+		*symbol->impl = dlsym(kperf, symbol->name);
 		if (!*symbol->impl) {
-			snprintf(lib_err_msg, sizeof(lib_err_msg),
-				 "Failed to load kperf function: %s.",
-				 symbol->name);
-			return_err();
-		}
-	}
-	for (usize i = 0; i < lib_nelems(lib_symbols_kperfdata); i++) {
-		const lib_symbol *symbol = &lib_symbols_kperfdata[i];
-		*symbol->impl = dlsym(lib_handle_kperfdata, symbol->name);
-		if (!*symbol->impl) {
-			snprintf(lib_err_msg, sizeof(lib_err_msg),
-				 "Failed to load kperfdata function: %s.",
-				 symbol->name);
-			return_err();
+			fprintf(stderr, "simple_kpc: failed to load kperf function %s\n",
+				symbol->name);
+			exit(1);
 		}
 	}
 
-	lib_inited = true;
-	lib_has_err = false;
-	return true;
+	for (usize i = 0; i < ARRAY_LENGTH(KPERFDATA_SYMBOLS); i++) {
+		const symbol *symbol = &KPERFDATA_SYMBOLS[i];
+		void *p = dlsym(kperfdata, symbol->name);
+		if (!p) {
+			fprintf(stderr,
+				"simple_kpc: failed to load kperfdata function %s\n",
+				symbol->name);
+			exit(1);
+		}
+		*symbol->impl = p;
+	}
 
-#undef return_err
+	if (kpc_force_all_ctrs_get(NULL) != 0) {
+		fprintf(stderr, "simple_kpc: permission denied, xnu/kpc requires root privileges\n");
+		exit(1);
+	}
+
+	initialized = true;
 }
 
 static void profile_func(void)
@@ -334,6 +300,8 @@ struct sk_in_progress_measurement {
 
 sk_in_progress_measurement *sk_start_measurement(sk_events *e)
 {
+	assert(initialized);
+
 	sk_in_progress_measurement *m =
 		calloc(1, sizeof(sk_in_progress_measurement));
 	*m = (sk_in_progress_measurement){
@@ -408,13 +376,7 @@ void sk_finish_measurement(sk_in_progress_measurement *m)
 
 int main(int argc, const char *argv[])
 {
-	lib_init();
-
-	if (kpc_force_all_ctrs_get(NULL) != 0) {
-		printf("Permission denied, xnu/kpc requires root "
-		       "privileges.\n");
-		return 1;
-	}
+	sk_init();
 
 	sk_events *e = sk_events_create();
 	sk_events_push(e, "cycles", "FIXED_CYCLES");
