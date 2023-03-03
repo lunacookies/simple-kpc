@@ -1,5 +1,5 @@
-#include <stdbool.h>
 #include <locale.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,8 +105,8 @@ static void (*kpep_config_free)(void *cfg);
 ///            If return value is `CONFLICTING_EVENTS`, this bitmap contains
 ///            the conflicted event indices, e.g. "1 << 2" means index 2.
 /// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_add_event)(void *cfg, void **ev_ptr,
-				    u32 flag, u32 *err);
+static int (*kpep_config_add_event)(void *cfg, void **ev_ptr, u32 flag,
+				    u32 *err);
 
 /// Force all counters.
 /// @return kpep_config_error_code, 0 for success.
@@ -117,8 +117,7 @@ static int (*kpep_config_force_counters)(void *cfg);
 /// @param buf_size The buffer's size in bytes, should not smaller than
 ///                 kpep_config_kpc_count() * sizeof(u64).
 /// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_kpc)(void *cfg, u64 *buf,
-			      usize buf_size);
+static int (*kpep_config_kpc)(void *cfg, u64 *buf, usize buf_size);
 
 /// Get kpc classes.
 /// @param classes See `class mask constants` above.
@@ -303,17 +302,17 @@ events events_create()
 {
 	struct events *e = calloc(1, sizeof(struct events));
 	*e = (struct events){
-		.human_readable_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
-		.internal_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
+		.human_readable_names =
+			calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
+		.internal_names =
+			calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.count = 0,
 	};
 	return (events){ .p = e };
 }
 
-void events_push(
-		events events,
-		const char *human_readable_name,
-		const char *internal_name)
+void events_push(events events, const char *human_readable_name,
+		 const char *internal_name)
 {
 	struct events *e = events.p;
 	e->human_readable_names[e->count] = human_readable_name;
@@ -365,10 +364,10 @@ in_progress_measurement start_measurement(events events)
 		kpep_db_event(kpep_db, internal_name, &event);
 
 		if (event == NULL) {
-			const char *human_readable_name = m->events->human_readable_names[i];
+			const char *human_readable_name =
+				m->events->human_readable_names[i];
 			printf("Cannot find event for %s: “%s”.\n",
-				human_readable_name,
-				internal_name);
+			       human_readable_name, internal_name);
 			exit(1);
 		}
 
@@ -376,7 +375,8 @@ in_progress_measurement start_measurement(events events)
 	}
 
 	kpep_config_kpc_classes(kpep_config, &m->classes);
-	kpep_config_kpc_map(kpep_config, m->counter_map, sizeof(m->counter_map));
+	kpep_config_kpc_map(kpep_config, m->counter_map,
+			    sizeof(m->counter_map));
 	kpep_config_kpc(kpep_config, m->regs, sizeof(m->regs));
 
 	kpep_config_free(kpep_config);
@@ -421,7 +421,8 @@ int main(int argc, const char *argv[])
 	lib_init();
 
 	if (kpc_force_all_ctrs_get(NULL) != 0) {
-		printf("Permission denied, xnu/kpc requires root privileges.\n");
+		printf("Permission denied, xnu/kpc requires root "
+		       "privileges.\n");
 		return 1;
 	}
 
