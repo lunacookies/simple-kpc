@@ -809,15 +809,6 @@ struct event_spec {
 	const char *db_name;
 };
 
-static const struct event_spec event_specs[] = {
-	{ "cycles", "FIXED_CYCLES" },
-	{ "instructions", "FIXED_INSTRUCTIONS" },
-	{ "branches", "INST_BRANCH" },
-	{ "branch misses", "BRANCH_MISPRED_NONSPEC" },
-	{ "subroutine calls", "INST_BRANCH_CALL" }
-};
-#define EVENT_SPEC_COUNT (sizeof(event_specs) / sizeof(struct event_spec))
-
 static void profile_func(void)
 {
 	for (u32 i = 0; i < 100000; i++) {
@@ -827,59 +818,17 @@ static void profile_func(void)
 	}
 }
 
-struct config {
-	u32 classes;
-	usize counter_map[KPC_MAX_COUNTERS];
-	u64 regs[KPC_MAX_COUNTERS];
-};
-
-struct config config_create(void)
-{
-	void *kpep_db = NULL;
-	kpep_db_create(NULL, &kpep_db);
-
-	void *kpep_config = NULL;
-	kpep_config_create(kpep_db, &kpep_config);
-	kpep_config_force_counters(kpep_config);
-
-	for (usize i = 0; i < EVENT_SPEC_COUNT; i++) {
-		const struct event_spec spec = event_specs[i];
-		void *event = NULL;
-		kpep_db_event(kpep_db, spec.db_name, &event);
-
-		if (event == NULL) {
-			printf("Cannot find event for %s: “%s”.\n",
-				spec.friendly_name,
-				spec.db_name);
-			exit(1);
-		}
-
-		kpep_config_add_event(kpep_config, &event, 0, NULL);
-	}
-
-	struct config config = { 0 };
-
-	kpep_config_kpc_classes(kpep_config, &config.classes);
-	kpep_config_kpc_map(kpep_config, &config.counter_map, sizeof(config.counter_map));
-	kpep_config_kpc(kpep_config, &config.regs, sizeof(config.regs));
-
-	kpep_config_free(kpep_config);
-	kpep_db_free(kpep_db);
-
-	return config;
-}
-
 struct config_internal {
-	const char *human_readable_event_names;
-	const char *internal_event_names;
+	const char **human_readable_event_names;
+	const char **internal_event_names;
 	usize event_count;
 };
 typedef void *config;
 
 config config_create()
 {
-	config_internal *ci = calloc(1, sizeof(config_internal));
-	*ci = (config_internal){
+	struct config_internal *ci = calloc(1, sizeof(struct config_internal));
+	*ci = (struct config_internal){
 		.human_readable_event_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.internal_event_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.event_count = 0,
@@ -892,31 +841,103 @@ void config_push_event(
 		const char *human_readable_name,
 		const char *internal_name)
 {
-	config_internal *ci = c;
+	struct config_internal *ci = c;
 	ci->human_readable_event_names[ci->event_count] = human_readable_name;
 	ci->internal_event_names[ci->event_count] = internal_name;
 	ci->event_count++;
-	return ci;
 }
 
 void config_destroy(config c)
 {
-	config_internal *ci = c;
+	struct config_internal *ci = c;
 	free(ci->human_readable_event_names);
 	free(ci->internal_event_names);
 	free(ci);
 }
 
 struct in_progress_measurement_internal {
-	config_internal *config;
+	struct config_internal *config;
+	u32 classes;
+	usize counter_map[KPC_MAX_COUNTERS];
+	u64 regs[KPC_MAX_COUNTERS];
 	u64 counters[KPC_MAX_COUNTERS];
 };
 
 typedef void *in_progress_measurement;
 
-in_progress_measurement start_measurement(config config)
+in_progress_measurement start_measurement(config c)
 {
-	
+	struct in_progress_measurement_internal *m =
+		calloc(1, sizeof(struct in_progress_measurement_internal));
+	*m = (struct in_progress_measurement_internal){
+		.config = c,
+		.classes = 0,
+		.counter_map = { 0 },
+		.counters = { 0 },
+	};
+
+	void *kpep_db = NULL;
+	kpep_db_create(NULL, &kpep_db);
+
+	void *kpep_config = NULL;
+	kpep_config_create(kpep_db, &kpep_config);
+	kpep_config_force_counters(kpep_config);
+
+	for (usize i = 0; i < m->config->event_count; i++) {
+		const char *internal_name = m->config->internal_event_names[i];
+		void *event = NULL;
+		kpep_db_event(kpep_db, internal_name, &event);
+
+		if (event == NULL) {
+			const char *human_readable_name = m->config->human_readable_event_names[i];
+			printf("Cannot find event for %s: “%s”.\n",
+				human_readable_name,
+				internal_name);
+			exit(1);
+		}
+
+		kpep_config_add_event(kpep_config, &event, 0, NULL);
+	}
+
+	kpep_config_kpc_classes(kpep_config, &m->classes);
+	kpep_config_kpc_map(kpep_config, m->counter_map, sizeof(m->counter_map));
+	kpep_config_kpc(kpep_config, m->regs, sizeof(m->regs));
+
+	kpep_config_free(kpep_config);
+	kpep_db_free(kpep_db);
+
+	kpc_force_all_ctrs_set(1);
+	kpc_set_config(m->classes, m->regs);
+
+	// Don’t put any library code below these kpc calls!
+	kpc_set_counting(m->classes);
+	kpc_set_thread_counting(m->classes);
+	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, m->counters);
+	return m;
+}
+
+void finish_measurement(in_progress_measurement m)
+{
+	struct in_progress_measurement_internal *mi = m;
+
+	u64 counters_after[KPC_MAX_COUNTERS] = { 0 };
+
+	// Don’t put any library code above these kpc calls!
+	// We don’t want to execute anything until timing has stopped
+	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, counters_after);
+	kpc_set_counting(0);
+	kpc_force_all_ctrs_set(0);
+
+	setlocale(LC_NUMERIC, "");
+	printf("counters value:\n");
+	for (usize i = 0; i < mi->config->event_count; i++) {
+		const char *name = mi->config->human_readable_event_names[i];
+		usize idx = mi->counter_map[i];
+		u64 diff = counters_after[idx] - mi->counters[idx];
+		printf("%40s: %15'llu\n", name, diff);
+	}
+
+	free(m);
 }
 
 int main(int argc, const char *argv[])
@@ -928,30 +949,16 @@ int main(int argc, const char *argv[])
 		return 1;
 	}
 
-	struct config config = config_create();
+	config c = config_create();
+	config_push_event(c, "cycles", "FIXED_CYCLES");
+	config_push_event(c, "instructions", "FIXED_INSTRUCTIONS");
+	config_push_event(c, "branches", "INST_BRANCH");
+	config_push_event(c, "branch misses", "BRANCH_MISPRED_NONSPEC");
+	config_push_event(c, "subroutine calls", "INST_BRANCH_CALL");
 
-	kpc_force_all_ctrs_set(1);
-	kpc_set_config(config.classes, config.regs);
-
-	u64 counters_before[KPC_MAX_COUNTERS] = { 0 };
-	u64 counters_after[KPC_MAX_COUNTERS] = { 0 };
-
-	kpc_set_counting(config.classes);
-	kpc_set_thread_counting(config.classes);
-	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, counters_before);
-
+	in_progress_measurement m = start_measurement(c);
 	profile_func();
+	finish_measurement(m);
 
-	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, counters_after);
-	kpc_set_counting(0);
-	kpc_force_all_ctrs_set(0);
-
-	setlocale(LC_NUMERIC, "");
-	printf("counters value:\n");
-	for (usize i = 0; i < EVENT_SPEC_COUNT; i++) {
-		const char *friendly_name = event_specs[i].friendly_name;
-		usize idx = config.counter_map[i];
-		u64 val = counters_after[idx] - counters_before[idx];
-		printf("%40s: %15'llu\n", friendly_name, val);
-	}
+	config_destroy(c);
 }
