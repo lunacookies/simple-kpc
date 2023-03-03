@@ -288,7 +288,7 @@ static void profile_func(void)
 	}
 }
 
-struct events {
+struct sk_events {
 	const char **human_readable_names;
 	const char **internal_names;
 	usize count;
@@ -296,40 +296,40 @@ struct events {
 
 typedef struct {
 	void *p;
-} events;
+} sk_events;
 
-events events_create()
+sk_events sk_events_create()
 {
-	struct events *e = calloc(1, sizeof(struct events));
-	*e = (struct events){
+	struct sk_events *e = calloc(1, sizeof(struct sk_events));
+	*e = (struct sk_events){
 		.human_readable_names =
 			calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.internal_names =
 			calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.count = 0,
 	};
-	return (events){ .p = e };
+	return (sk_events){ .p = e };
 }
 
-void events_push(events events, const char *human_readable_name,
+void sk_events_push(sk_events events, const char *human_readable_name,
 		 const char *internal_name)
 {
-	struct events *e = events.p;
+	struct sk_events *e = events.p;
 	e->human_readable_names[e->count] = human_readable_name;
 	e->internal_names[e->count] = internal_name;
 	e->count++;
 }
 
-void events_destroy(events events)
+void sk_events_destroy(sk_events events)
 {
-	struct events *e = events.p;
+	struct sk_events *e = events.p;
 	free(e->human_readable_names);
 	free(e->internal_names);
 	free(e);
 }
 
-struct in_progress_measurement {
-	struct events *events;
+struct sk_in_progress_measurement {
+	struct sk_events *events;
 	u32 classes;
 	usize counter_map[KPC_MAX_COUNTERS];
 	u64 regs[KPC_MAX_COUNTERS];
@@ -338,13 +338,13 @@ struct in_progress_measurement {
 
 typedef struct {
 	void *p;
-} in_progress_measurement;
+} sk_in_progress_measurement;
 
-in_progress_measurement start_measurement(events events)
+sk_in_progress_measurement sk_start_measurement(sk_events events)
 {
-	struct in_progress_measurement *m =
-		calloc(1, sizeof(struct in_progress_measurement));
-	*m = (struct in_progress_measurement){
+	struct sk_in_progress_measurement *m =
+		calloc(1, sizeof(struct sk_in_progress_measurement));
+	*m = (struct sk_in_progress_measurement){
 		.events = events.p,
 		.classes = 0,
 		.counter_map = { 0 },
@@ -389,12 +389,12 @@ in_progress_measurement start_measurement(events events)
 	kpc_set_counting(m->classes);
 	kpc_set_thread_counting(m->classes);
 	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, m->counters);
-	return (in_progress_measurement){ .p = m };
+	return (sk_in_progress_measurement){ .p = m };
 }
 
-void finish_measurement(in_progress_measurement in_progress_measurement)
+void sk_finish_measurement(sk_in_progress_measurement in_progress_measurement)
 {
-	struct in_progress_measurement *m = in_progress_measurement.p;
+	struct sk_in_progress_measurement *m = in_progress_measurement.p;
 
 	u64 counters_after[KPC_MAX_COUNTERS] = { 0 };
 
@@ -426,16 +426,16 @@ int main(int argc, const char *argv[])
 		return 1;
 	}
 
-	events e = events_create();
-	events_push(e, "cycles", "FIXED_CYCLES");
-	events_push(e, "instructions", "FIXED_INSTRUCTIONS");
-	events_push(e, "branches", "INST_BRANCH");
-	events_push(e, "branch misses", "BRANCH_MISPRED_NONSPEC");
-	events_push(e, "subroutine calls", "INST_BRANCH_CALL");
+	sk_events e = sk_events_create();
+	sk_events_push(e, "cycles", "FIXED_CYCLES");
+	sk_events_push(e, "instructions", "FIXED_INSTRUCTIONS");
+	sk_events_push(e, "branches", "INST_BRANCH");
+	sk_events_push(e, "branch misses", "BRANCH_MISPRED_NONSPEC");
+	sk_events_push(e, "subroutine calls", "INST_BRANCH_CALL");
 
-	in_progress_measurement m = start_measurement(e);
+	sk_in_progress_measurement m = sk_start_measurement(e);
 	profile_func();
-	finish_measurement(m);
+	sk_finish_measurement(m);
 
-	events_destroy(e);
+	sk_events_destroy(e);
 }
