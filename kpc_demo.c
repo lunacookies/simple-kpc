@@ -294,7 +294,10 @@ struct events {
 	const char **internal_names;
 	usize count;
 };
-typedef void *events;
+
+typedef struct {
+	void *p;
+} events;
 
 events events_create()
 {
@@ -304,7 +307,7 @@ events events_create()
 		.internal_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
 		.count = 0,
 	};
-	return e;
+	return (events){ .p = e };
 }
 
 void events_push(
@@ -312,7 +315,7 @@ void events_push(
 		const char *human_readable_name,
 		const char *internal_name)
 {
-	struct events *e = events;
+	struct events *e = events.p;
 	e->human_readable_names[e->count] = human_readable_name;
 	e->internal_names[e->count] = internal_name;
 	e->count++;
@@ -320,7 +323,7 @@ void events_push(
 
 void events_destroy(events events)
 {
-	struct events *e = events;
+	struct events *e = events.p;
 	free(e->human_readable_names);
 	free(e->internal_names);
 	free(e);
@@ -334,14 +337,16 @@ struct in_progress_measurement {
 	u64 counters[KPC_MAX_COUNTERS];
 };
 
-typedef void *in_progress_measurement;
+typedef struct {
+	void *p;
+} in_progress_measurement;
 
 in_progress_measurement start_measurement(events events)
 {
 	struct in_progress_measurement *m =
 		calloc(1, sizeof(struct in_progress_measurement));
 	*m = (struct in_progress_measurement){
-		.events = events,
+		.events = events.p,
 		.classes = 0,
 		.counter_map = { 0 },
 		.counters = { 0 },
@@ -384,12 +389,12 @@ in_progress_measurement start_measurement(events events)
 	kpc_set_counting(m->classes);
 	kpc_set_thread_counting(m->classes);
 	kpc_get_thread_counters(0, KPC_MAX_COUNTERS, m->counters);
-	return m;
+	return (in_progress_measurement){ .p = m };
 }
 
 void finish_measurement(in_progress_measurement in_progress_measurement)
 {
-	struct in_progress_measurement *m = in_progress_measurement;
+	struct in_progress_measurement *m = in_progress_measurement.p;
 
 	u64 counters_after[KPC_MAX_COUNTERS] = { 0 };
 
