@@ -1,13 +1,13 @@
 #include "simple_kpc.h"
 
 #include <assert.h>
+#include <dlfcn.h>
 #include <locale.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dlfcn.h>
 
 typedef int8_t i8;
 typedef uint8_t u8;
@@ -36,8 +36,8 @@ static int (*kpc_force_all_ctrs_get)(int *val_out);
 
 static int (*kpep_config_create)(kpep_db *db, kpep_config **cfg_ptr);
 static void (*kpep_config_free)(kpep_config *cfg);
-static int (*kpep_config_add_event)(kpep_config *cfg, kpep_event **ev_ptr, u32 flag,
-				    u32 *err);
+static int (*kpep_config_add_event)(kpep_config *cfg, kpep_event **ev_ptr,
+				    u32 flag, u32 *err);
 static int (*kpep_config_force_counters)(kpep_config *cfg);
 static int (*kpep_config_kpc)(kpep_config *cfg, u64 *buf, usize buf_size);
 static int (*kpep_config_kpc_classes)(kpep_config *cfg, u32 *classes_ptr);
@@ -52,28 +52,23 @@ typedef struct {
 	void **impl;
 } symbol;
 
-#define SYMBOL(n) { .name = #n, .impl = (void **)&n }
+#define SYMBOL(n)                                                              \
+	{                                                                      \
+		.name = #n, .impl = (void **)&n                                \
+	}
 
 static const symbol KPERF_SYMBOLS[] = {
-	SYMBOL(kpc_set_counting),
-	SYMBOL(kpc_set_thread_counting),
-	SYMBOL(kpc_set_config),
-	SYMBOL(kpc_get_thread_counters),
-	SYMBOL(kpc_force_all_ctrs_set),
-	SYMBOL(kpc_force_all_ctrs_get),
+	SYMBOL(kpc_set_counting),	SYMBOL(kpc_set_thread_counting),
+	SYMBOL(kpc_set_config),		SYMBOL(kpc_get_thread_counters),
+	SYMBOL(kpc_force_all_ctrs_set), SYMBOL(kpc_force_all_ctrs_get),
 };
 
 static const symbol KPERFDATA_SYMBOLS[] = {
-	SYMBOL(kpep_config_create),
-	SYMBOL(kpep_config_free),
-	SYMBOL(kpep_config_add_event),
-	SYMBOL(kpep_config_force_counters),
-	SYMBOL(kpep_config_kpc),
-	SYMBOL(kpep_config_kpc_classes),
-	SYMBOL(kpep_config_kpc_map),
-	SYMBOL(kpep_db_create),
-	SYMBOL(kpep_db_free),
-	SYMBOL(kpep_db_event),
+	SYMBOL(kpep_config_create),    SYMBOL(kpep_config_free),
+	SYMBOL(kpep_config_add_event), SYMBOL(kpep_config_force_counters),
+	SYMBOL(kpep_config_kpc),       SYMBOL(kpep_config_kpc_classes),
+	SYMBOL(kpep_config_kpc_map),   SYMBOL(kpep_db_create),
+	SYMBOL(kpep_db_free),	       SYMBOL(kpep_db_event),
 };
 
 #define KPERF_PATH "/System/Library/PrivateFrameworks/kperf.framework/kperf"
@@ -89,7 +84,9 @@ void sk_init(void)
 
 	void *kperf = dlopen(KPERF_PATH, RTLD_LAZY);
 	if (!kperf) {
-		fprintf(stderr, "simple_kpc: failed to load kperf.framework, message: %s\n",
+		fprintf(stderr,
+			"simple_kpc: failed to load kperf.framework, message: "
+			"%s\n",
 			dlerror());
 		exit(1);
 	}
@@ -97,7 +94,8 @@ void sk_init(void)
 	void *kperfdata = dlopen(KPERFDATA_PATH, RTLD_LAZY);
 	if (!kperfdata) {
 		fprintf(stderr,
-			"simple_kpc: failed to load kperfdata.framework, message: %s\n",
+			"simple_kpc: failed to load kperfdata.framework, "
+			"message: %s\n",
 			dlerror());
 		exit(1);
 	}
@@ -106,7 +104,9 @@ void sk_init(void)
 		const symbol *symbol = &KPERF_SYMBOLS[i];
 		*symbol->impl = dlsym(kperf, symbol->name);
 		if (!*symbol->impl) {
-			fprintf(stderr, "simple_kpc: failed to load kperf function %s\n",
+			fprintf(stderr,
+				"simple_kpc: failed to load kperf function "
+				"%s\n",
 				symbol->name);
 			exit(1);
 		}
@@ -117,7 +117,8 @@ void sk_init(void)
 		void *p = dlsym(kperfdata, symbol->name);
 		if (!p) {
 			fprintf(stderr,
-				"simple_kpc: failed to load kperfdata function %s\n",
+				"simple_kpc: failed to load kperfdata function "
+				"%s\n",
 				symbol->name);
 			exit(1);
 		}
@@ -125,7 +126,8 @@ void sk_init(void)
 	}
 
 	if (kpc_force_all_ctrs_get(NULL) != 0) {
-		fprintf(stderr, "simple_kpc: permission denied, xnu/kpc requires root privileges\n");
+		fprintf(stderr, "simple_kpc: permission denied, xnu/kpc "
+				"requires root privileges\n");
 		exit(1);
 	}
 
