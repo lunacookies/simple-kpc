@@ -102,14 +102,15 @@ void sk_init(void)
 
 	for (usize i = 0; i < ARRAY_LENGTH(KPERF_SYMBOLS); i++) {
 		const symbol *symbol = &KPERF_SYMBOLS[i];
-		*symbol->impl = dlsym(kperf, symbol->name);
-		if (!*symbol->impl) {
+		void *p = dlsym(kperf, symbol->name);
+		if (!p) {
 			fprintf(stderr,
 				"simple_kpc: failed to load kperf function "
 				"%s\n",
 				symbol->name);
 			exit(1);
 		}
+		*symbol->impl = p;
 	}
 
 	for (usize i = 0; i < ARRAY_LENGTH(KPERFDATA_SYMBOLS); i++) {
