@@ -20,7 +20,6 @@ int main()
 	sk_events_push(e, "instructions", "FIXED_INSTRUCTIONS");
 	sk_events_push(e, "branches", "INST_BRANCH");
 	sk_events_push(e, "branch misses", "BRANCH_MISPRED_NONSPEC");
-	sk_events_push(e, "subroutine calls", "INST_BRANCH_CALL");
 
 	sk_in_progress_measurement *m = sk_start_measurement(e);
 	your_code_here();
