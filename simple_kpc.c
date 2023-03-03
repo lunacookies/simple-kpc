@@ -7,12 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
 
-#include <dlfcn.h> // for dlopen() and dlsym()
-#include <sys/sysctl.h> // for sysctl()
-
-typedef float f32;
-typedef double f64;
 typedef int8_t i8;
 typedef uint8_t u8;
 typedef int16_t i16;
@@ -25,140 +21,31 @@ typedef size_t usize;
 
 #define ARRAY_LENGTH(x) (sizeof(x) / sizeof((x)[0]))
 
-// The maximum number of counters we could read from every class in one go.
-// ARMV7: FIXED: 1, CONFIGURABLE: 4
-// ARM32: FIXED: 2, CONFIGURABLE: 6
-// ARM64: FIXED: 2, CONFIGURABLE: CORE_NCTRS - FIXED (6 or 8)
-// x86: 32
 #define KPC_MAX_COUNTERS 32
 
-/// Set PMC classes to enable counting.
-/// @param classes See `class mask constants` above, set 0 to shutdown counting.
-/// @return 0 for success.
-/// @details sysctl set(kpc.counting)
+typedef struct kpep_db kpep_db;
+typedef struct kpep_config kpep_config;
+typedef struct kpep_event kpep_event;
+
 static int (*kpc_set_counting)(u32 classes);
-
-/// Set PMC classes to enable counting for current thread.
-/// @param classes See `class mask constants` above, set 0 to shutdown counting.
-/// @return 0 for success.
-/// @details sysctl set(kpc.thread_counting)
 static int (*kpc_set_thread_counting)(u32 classes);
-
-/// Set config registers.
-/// @param classes see `class mask constants` above.
-/// @param config Config buffer, should not smaller than
-///               kpc_get_config_count(classes) * sizeof(u64).
-/// @return 0 for success.
-/// @details sysctl get(kpc.config_count), set(kpc.config)
 static int (*kpc_set_config)(u32 classes, u64 *config);
-
-/// Get counter accumulations for current thread.
-/// @param tid Thread id, should be 0.
-/// @param buf_count The number of buf's elements (not bytes),
-///                  should not smaller than kpc_get_counter_count().
-/// @param buf Buffer to receive counter's value.
-/// @return 0 for success.
-/// @details sysctl get(kpc.thread_counters)
 static int (*kpc_get_thread_counters)(u32 tid, u32 buf_count, u64 *buf);
-
-/// Acquire/release the counters used by the Power Manager.
-/// @param val 1:acquire, 0:release
-/// @return 0 for success.
-/// @details sysctl set(kpc.force_all_ctrs)
 static int (*kpc_force_all_ctrs_set)(int val);
-
-/// Get the state of all_ctrs.
-/// @return 0 for success.
-/// @details sysctl get(kpc.force_all_ctrs)
 static int (*kpc_force_all_ctrs_get)(int *val_out);
 
-// -----------------------------------------------------------------------------
-// <kperfdata.framework> header (reverse engineered)
-// This framework provides some functions to access the local CPU database.
-// These functions do not require root privileges.
-// -----------------------------------------------------------------------------
-
-/// KPEP event (size: 48/28 bytes on 64/32 bit OS)
-typedef struct kpep_event {
-	const char
-		*name; ///< Unique name of a event, such as "INST_RETIRED.ANY".
-	const char *description; ///< Description for this event.
-	const char *errata; ///< Errata, currently NULL.
-	const char *alias; ///< Alias name, such as "Instructions", "Cycles".
-	const char *fallback; ///< Fallback event name for fixed counter.
-	u32 mask;
-	u8 number;
-	u8 umask;
-	u8 reserved;
-	u8 is_fixed;
-} kpep_event;
-
-/// Create a config.
-/// @param db A kpep db, see kpep_db_create()
-/// @param cfg_ptr A pointer to receive the new config.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_create)(void *db, void **cfg_ptr);
-
-/// Free the config.
-static void (*kpep_config_free)(void *cfg);
-
-/// Add an event to config.
-/// @param cfg The config.
-/// @param ev_ptr A event pointer.
-/// @param flag 0: all, 1: user space only
-/// @param err Error bitmap pointer, can be NULL.
-///            If return value is `CONFLICTING_EVENTS`, this bitmap contains
-///            the conflicted event indices, e.g. "1 << 2" means index 2.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_add_event)(void *cfg, void **ev_ptr, u32 flag,
+static int (*kpep_config_create)(kpep_db *db, kpep_config **cfg_ptr);
+static void (*kpep_config_free)(kpep_config *cfg);
+static int (*kpep_config_add_event)(kpep_config *cfg, kpep_event **ev_ptr, u32 flag,
 				    u32 *err);
+static int (*kpep_config_force_counters)(kpep_config *cfg);
+static int (*kpep_config_kpc)(kpep_config *cfg, u64 *buf, usize buf_size);
+static int (*kpep_config_kpc_classes)(kpep_config *cfg, u32 *classes_ptr);
+static int (*kpep_config_kpc_map)(kpep_config *cfg, usize *buf, usize buf_size);
 
-/// Force all counters.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_force_counters)(void *cfg);
-
-/// Get kpc register configs.
-/// @param buf A buffer to receive kpc register configs.
-/// @param buf_size The buffer's size in bytes, should not smaller than
-///                 kpep_config_kpc_count() * sizeof(u64).
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_kpc)(void *cfg, u64 *buf, usize buf_size);
-
-/// Get kpc classes.
-/// @param classes See `class mask constants` above.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_kpc_classes)(void *cfg, u32 *classes_ptr);
-
-/// Get the index mapping from event to counter.
-/// @param buf A buffer to receive indexes.
-/// @param buf_size The buffer's size in bytes, should not smaller than
-///                 kpep_config_events_count() * sizeof(u64).
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_config_kpc_map)(void *cfg, usize *buf, usize buf_size);
-
-/// Open a kpep database file in "/usr/share/kpep/" or "/usr/local/share/kpep/".
-/// @param name File name, for example "haswell", "cpu_100000c_1_92fb37c8".
-///             Pass NULL for current CPU.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_db_create)(const char *name, void **db_ptr);
-
-/// Free the kpep database.
-static void (*kpep_db_free)(void *db);
-
-/// Get all event count.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_db_events_count)(void *db, usize *count);
-
-/// Get all events.
-/// @param buf A buffer to receive all event pointers.
-/// @param buf_size The buffer's size in bytes,
-///        should not smaller than kpep_db_events_count() * sizeof(void *).
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_db_events)(void *db, void **buf, usize buf_size);
-
-/// Get one event by name.
-/// @return kpep_config_error_code, 0 for success.
-static int (*kpep_db_event)(void *db, const char *name, void **ev_ptr);
+static int (*kpep_db_create)(const char *name, kpep_db **db_ptr);
+static void (*kpep_db_free)(kpep_db *db);
+static int (*kpep_db_event)(kpep_db *db, const char *name, kpep_event **ev_ptr);
 
 typedef struct {
 	const char *name;
@@ -186,8 +73,6 @@ static const symbol KPERFDATA_SYMBOLS[] = {
 	SYMBOL(kpep_config_kpc_map),
 	SYMBOL(kpep_db_create),
 	SYMBOL(kpep_db_free),
-	SYMBOL(kpep_db_events_count),
-	SYMBOL(kpep_db_events),
 	SYMBOL(kpep_db_event),
 };
 
@@ -311,16 +196,16 @@ sk_in_progress_measurement *sk_start_measurement(sk_events *e)
 		.counters = { 0 },
 	};
 
-	void *kpep_db = NULL;
+	kpep_db *kpep_db = NULL;
 	kpep_db_create(NULL, &kpep_db);
 
-	void *kpep_config = NULL;
+	kpep_config *kpep_config = NULL;
 	kpep_config_create(kpep_db, &kpep_config);
 	kpep_config_force_counters(kpep_config);
 
 	for (usize i = 0; i < m->events->count; i++) {
 		const char *internal_name = m->events->internal_names[i];
-		void *event = NULL;
+		kpep_event *event = NULL;
 		kpep_db_event(kpep_db, internal_name, &event);
 
 		if (event == NULL) {
