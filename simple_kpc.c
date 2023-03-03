@@ -1,3 +1,5 @@
+#include "simple_kpc.h"
+
 #include <locale.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -294,11 +296,7 @@ struct sk_events {
 	usize count;
 };
 
-typedef struct {
-	void *p;
-} sk_events;
-
-sk_events sk_events_create()
+sk_events sk_events_create(void)
 {
 	struct sk_events *e = calloc(1, sizeof(struct sk_events));
 	*e = (struct sk_events){
@@ -335,10 +333,6 @@ struct sk_in_progress_measurement {
 	u64 regs[KPC_MAX_COUNTERS];
 	u64 counters[KPC_MAX_COUNTERS];
 };
-
-typedef struct {
-	void *p;
-} sk_in_progress_measurement;
 
 sk_in_progress_measurement sk_start_measurement(sk_events events)
 {
