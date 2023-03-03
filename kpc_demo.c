@@ -804,11 +804,6 @@ static int kdebug_wait(usize timeout_ms, bool *suc)
 // Demo
 // -----------------------------------------------------------------------------
 
-struct event_spec {
-	const char *friendly_name;
-	const char *db_name;
-};
-
 static void profile_func(void)
 {
 	for (u32 i = 0; i < 100000; i++) {
@@ -818,45 +813,45 @@ static void profile_func(void)
 	}
 }
 
-struct config_internal {
-	const char **human_readable_event_names;
-	const char **internal_event_names;
-	usize event_count;
+struct events {
+	const char **human_readable_names;
+	const char **internal_names;
+	usize count;
 };
-typedef void *config;
+typedef void *events;
 
-config config_create()
+events events_create()
 {
-	struct config_internal *ci = calloc(1, sizeof(struct config_internal));
-	*ci = (struct config_internal){
-		.human_readable_event_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
-		.internal_event_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
-		.event_count = 0,
+	struct events *e = calloc(1, sizeof(struct events));
+	*e = (struct events){
+		.human_readable_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
+		.internal_names = calloc(KPC_MAX_COUNTERS, sizeof(const char *)),
+		.count = 0,
 	};
-	return ci;
+	return e;
 }
 
-void config_push_event(
-		config c,
+void events_push(
+		events events,
 		const char *human_readable_name,
 		const char *internal_name)
 {
-	struct config_internal *ci = c;
-	ci->human_readable_event_names[ci->event_count] = human_readable_name;
-	ci->internal_event_names[ci->event_count] = internal_name;
-	ci->event_count++;
+	struct events *e = events;
+	e->human_readable_names[e->count] = human_readable_name;
+	e->internal_names[e->count] = internal_name;
+	e->count++;
 }
 
-void config_destroy(config c)
+void events_destroy(events events)
 {
-	struct config_internal *ci = c;
-	free(ci->human_readable_event_names);
-	free(ci->internal_event_names);
-	free(ci);
+	struct events *e = events;
+	free(e->human_readable_names);
+	free(e->internal_names);
+	free(e);
 }
 
 struct in_progress_measurement_internal {
-	struct config_internal *config;
+	struct events *events;
 	u32 classes;
 	usize counter_map[KPC_MAX_COUNTERS];
 	u64 regs[KPC_MAX_COUNTERS];
@@ -865,12 +860,12 @@ struct in_progress_measurement_internal {
 
 typedef void *in_progress_measurement;
 
-in_progress_measurement start_measurement(config c)
+in_progress_measurement start_measurement(events events)
 {
 	struct in_progress_measurement_internal *m =
 		calloc(1, sizeof(struct in_progress_measurement_internal));
 	*m = (struct in_progress_measurement_internal){
-		.config = c,
+		.events = events,
 		.classes = 0,
 		.counter_map = { 0 },
 		.counters = { 0 },
@@ -883,13 +878,13 @@ in_progress_measurement start_measurement(config c)
 	kpep_config_create(kpep_db, &kpep_config);
 	kpep_config_force_counters(kpep_config);
 
-	for (usize i = 0; i < m->config->event_count; i++) {
-		const char *internal_name = m->config->internal_event_names[i];
+	for (usize i = 0; i < m->events->count; i++) {
+		const char *internal_name = m->events->internal_names[i];
 		void *event = NULL;
 		kpep_db_event(kpep_db, internal_name, &event);
 
 		if (event == NULL) {
-			const char *human_readable_name = m->config->human_readable_event_names[i];
+			const char *human_readable_name = m->events->human_readable_names[i];
 			printf("Cannot find event for %s: “%s”.\n",
 				human_readable_name,
 				internal_name);
@@ -930,8 +925,8 @@ void finish_measurement(in_progress_measurement m)
 
 	setlocale(LC_NUMERIC, "");
 	printf("counters value:\n");
-	for (usize i = 0; i < mi->config->event_count; i++) {
-		const char *name = mi->config->human_readable_event_names[i];
+	for (usize i = 0; i < mi->events->count; i++) {
+		const char *name = mi->events->human_readable_names[i];
 		usize idx = mi->counter_map[i];
 		u64 diff = counters_after[idx] - mi->counters[idx];
 		printf("%40s: %15'llu\n", name, diff);
@@ -949,16 +944,16 @@ int main(int argc, const char *argv[])
 		return 1;
 	}
 
-	config c = config_create();
-	config_push_event(c, "cycles", "FIXED_CYCLES");
-	config_push_event(c, "instructions", "FIXED_INSTRUCTIONS");
-	config_push_event(c, "branches", "INST_BRANCH");
-	config_push_event(c, "branch misses", "BRANCH_MISPRED_NONSPEC");
-	config_push_event(c, "subroutine calls", "INST_BRANCH_CALL");
+	events e = events_create();
+	events_push(e, "cycles", "FIXED_CYCLES");
+	events_push(e, "instructions", "FIXED_INSTRUCTIONS");
+	events_push(e, "branches", "INST_BRANCH");
+	events_push(e, "branch misses", "BRANCH_MISPRED_NONSPEC");
+	events_push(e, "subroutine calls", "INST_BRANCH_CALL");
 
-	in_progress_measurement m = start_measurement(c);
+	in_progress_measurement m = start_measurement(e);
 	profile_func();
 	finish_measurement(m);
 
-	config_destroy(c);
+	events_destroy(e);
 }
